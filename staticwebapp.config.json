@@ -1,0 +1,26 @@
+# Azure Static Web Apps configuration
+# Supports custom routing, authentication, and more
+# https://docs.microsoft.com/azure/static-web-apps/configuration
+
+{
+  "routes": [
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/*",
+      "serve": "/index.html",
+      "statusCode": 200
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/static/*", "/*.{css,scss,js,png,gif,ico,jpg,svg}"]
+  },
+  "mimeTypes": {
+    ".json": "application/json",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg"
+  }
+}

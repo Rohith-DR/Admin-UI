@@ -1,8 +1,10 @@
 // API service for backend communication
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://bcitbackend1-drcveyacfxadeffs.koreacentral-01.azurewebsites.net';
+const API_URL = `${API_BASE_URL}/api`;
 
 console.log('🔧 API Configuration:', {
   API_BASE_URL,
+  API_URL,
   VITE_API_URL: import.meta.env.VITE_API_URL,
   NODE_ENV: import.meta.env.MODE
 });
@@ -49,7 +51,7 @@ export interface BatFoldersResponse {
  */
 export const fetchAllBatFolders = async (): Promise<BatFoldersResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/debug/folders`);
+    const response = await fetch(`${API_URL}/debug/folders`);
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -98,7 +100,7 @@ export const fetchBatFiles = async (
 ): Promise<BatFilesResponse> => {
   try {
     const response = await fetch(
-      `${API_BASE_URL}/bat/${batId}/files?server=${serverNum}&client=${clientNum}`
+      `${API_URL}/bat/${batId}/files?server=${serverNum}&client=${clientNum}`
     );
     
     if (!response.ok) {
@@ -120,7 +122,7 @@ export const fetchBatFiles = async (
  * Get the URL for a specific file
  */
 export const getFileUrl = (fileId: string, fileName: string): string => {
-  return `${API_BASE_URL}/file/${fileId}?name=${encodeURIComponent(fileName)}`;
+  return `${API_URL}/file/${fileId}?name=${encodeURIComponent(fileName)}`;
 };
 
 /**
@@ -128,7 +130,7 @@ export const getFileUrl = (fileId: string, fileName: string): string => {
  */
 export const checkBackendHealth = async (): Promise<boolean> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const response = await fetch(`${API_URL}/health`);
     const data = await response.json();
     return data.success === true;
   } catch (error) {
@@ -163,7 +165,7 @@ export const predictSpecies = async (
     // Strip "BAT" prefix if present (e.g., "BAT825" -> "825")
     const cleanBatId = batId.replace(/^BAT/i, '');
     
-    const url = `${API_BASE_URL}/predict/${cleanBatId}?server=${serverNum}&client=${clientNum}`;
+    const url = `${API_URL}/predict/${cleanBatId}?server=${serverNum}&client=${clientNum}`;
     console.log('🔗 Calling predict endpoint:', url);
     
     const response = await fetch(url);
@@ -188,7 +190,7 @@ export const predictSpecies = async (
  * Get species image URL
  */
 export const getSpeciesImageUrl = (speciesName: string): string => {
-  const url = `${API_BASE_URL}/species-image/${encodeURIComponent(speciesName)}`;
+  const url = `${API_URL}/species-image/${encodeURIComponent(speciesName)}`;
   console.log('🖼️ Species image URL:', url);
   return url;
 };
@@ -287,7 +289,7 @@ export const batchProcessFolder = async (
   folderTimestamp: string
 ): Promise<BatchFolderResponse> => {
   try {
-    const url = `${API_BASE_URL}/batch/folder`;
+    const url = `${API_URL}/batch/folder`;
     console.log('🚀 Starting batch folder processing:', { serverNum, clientNum, folderTimestamp });
     
     const response = await fetch(url, {
@@ -327,7 +329,7 @@ export const batchProcessFolder = async (
  */
 export const listBatFolders = async (): Promise<FolderListResponse> => {
   try {
-    const url = `${API_BASE_URL}/folders/list`;
+    const url = `${API_URL}/folders/list`;
     console.log('📂 Fetching BAT folders list');
     
     const response = await fetch(url);

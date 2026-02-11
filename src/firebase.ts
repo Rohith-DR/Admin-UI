@@ -204,6 +204,493 @@ export const loadAllServers = (callback: (servers: any) => void) => {
   return () => off(serversRef);
 };
 
+// ==================== STANDALONE FUNCTIONS ====================
+
+/**
+ * Create a new standalone
+ */
+export const createStandalone = async (standaloneId: string, location?: { lat: number; long: number; name: string }) => {
+  try {
+    const standaloneRef = ref(database, `standalones/${standaloneId}`);
+    await set(standaloneRef, {
+      standaloneinfo: {
+        lat: location?.lat || 0,
+        long: location?.long || 0,
+        location_name: location?.name || "Not set",
+        location_updated: false
+      },
+      mode: {
+        type: "idle",
+        duration_sec: 0,
+        schedule_key: "",
+        updated_at: new Date().toISOString()
+      },
+      active_status: {
+        status: "idle",
+        progress: 0,
+        total_files: 0,
+        total_size_bytes: 0
+      },
+      connection_status: false,
+      scheduled_records: {
+        _placeholder: "No scheduled records yet"
+      },
+      predictions: {}
+    });
+    console.log('Standalone created:', standaloneId);
+  } catch (error) {
+    console.error('Failed to create standalone:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a standalone
+ */
+export const deleteStandalone = async (standaloneId: string) => {
+  try {
+    console.log(`🗑️ Attempting to delete standalone: ${standaloneId}`);
+    const standaloneRef = ref(database, `standalones/${standaloneId}`);
+    
+    const snapshot = await get(standaloneRef);
+    if (!snapshot.exists()) {
+      console.log(`⚠️ Standalone ${standaloneId} does not exist in Firebase`);
+      return;
+    }
+    
+    console.log(`📋 Standalone ${standaloneId} exists, proceeding with deletion...`);
+    await remove(standaloneRef);
+    
+    const verifySnapshot = await get(standaloneRef);
+    if (verifySnapshot.exists()) {
+      console.error(`❌ Standalone ${standaloneId} still exists after deletion attempt!`);
+      throw new Error('Standalone deletion failed - standalone still exists');
+    }
+    
+    console.log(`✅ Standalone ${standaloneId} successfully deleted from Firebase`);
+  } catch (error) {
+    console.error(`❌ Failed to delete standalone ${standaloneId}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Reset a standalone - resets mode, active_status, connection_status while preserving standaloneinfo, predictions, scheduled_records
+ */
+export const resetStandalone = async (standaloneId: string) => {
+  try {
+    const standaloneRef = ref(database, `standalones/${standaloneId}`);
+    
+    // Get existing data to preserve
+    const [infoSnapshot, recordsSnapshot, predictionsSnapshot] = await Promise.all([
+      new Promise<any>((resolve) => {
+        const infoRef = ref(database, `standalones/${standaloneId}/standaloneinfo`);
+        onValue(infoRef, (snapshot) => {
+          resolve(snapshot.val() || { lat: 0, long: 0, location_name: "Not set", location_updated: false });
+        }, { onlyOnce: true });
+      }),
+      new Promise<any>((resolve) => {
+        const recordsRef = ref(database, `standalones/${standaloneId}/scheduled_records`);
+        onValue(recordsRef, (snapshot) => {
+          resolve(snapshot.val() || { _placeholder: "No scheduled records yet" });
+        }, { onlyOnce: true });
+      }),
+      new Promise<any>((resolve) => {
+        const predictionsRef = ref(database, `standalones/${standaloneId}/predictions`);
+        onValue(predictionsRef, (snapshot) => {
+          resolve(snapshot.val() || {});
+        }, { onlyOnce: true });
+      })
+    ]);
+
+    // Ensure location_updated is set
+    const info = { ...(infoSnapshot || {}) } as any;
+    if (typeof info.location_updated === 'undefined') {
+      info.location_updated = false;
+    }
+
+    // Reset standalone while preserving standaloneinfo, scheduled_records, and predictions
+    await set(standaloneRef, {
+      standaloneinfo: info,
+      scheduled_records: recordsSnapshot,
+      predictions: predictionsSnapshot,
+      mode: {
+        type: "idle",
+        duration_sec: 0,
+        schedule_key: "",
+        updated_at: new Date().toISOString()
+      },
+      active_status: {
+        status: "idle",
+        progress: 0,
+        total_files: 0,
+        total_size_bytes: 0
+      },
+      connection_status: false
+    });
+    
+    console.log('Standalone reset (info, scheduled records, and predictions preserved):', standaloneId);
+  } catch (error) {
+    console.error('Failed to reset standalone:', error);
+    throw error;
+  }
+};
+
+/**
+ * Load all standalones from Firebase
+ */
+export const loadAllStandalones = (callback: (standalones: any) => void) => {
+  const standalonesRef = ref(database, 'standalones');
+  onValue(standalonesRef, (snapshot) => {
+    const data = snapshot.val();
+    callback(data || {});
+  });
+  return () => off(standalonesRef);
+};
+
+// ==================== STANDALONE BUTTON COMMANDS ====================
+
+/**
+ * STANDALONE LOCATION BUTTON
+ */
+export const setStandaloneLocationCommand = async (standaloneId: string) => {
+  try {
+    const modeRef = ref(database, `standalones/${standaloneId}/mode`);
+    await update(modeRef, {
+      type: "location",
+      updated_at: new Date().toISOString()
+    });
+    console.log('Standalone location command sent');
+  } catch (error) {
+    console.error('Failed to send standalone location command:', error);
+    throw error;
+  }
+};
+
+/**
+ * STANDALONE CONNECT BUTTON
+ */
+export const setStandaloneConnectCommand = async (standaloneId: string) => {
+  try {
+    const modeRef = ref(database, `standalones/${standaloneId}/mode`);
+    await update(modeRef, {
+      type: "connect",
+      updated_at: new Date().toISOString()
+    });
+    console.log('Standalone connect command sent');
+  } catch (error) {
+    console.error('Failed to send standalone connect command:', error);
+    throw error;
+  }
+};
+
+/**
+ * STANDALONE INSTANT BUTTON
+ */
+export const setStandaloneInstantCommand = async (standaloneId: string, durationSec: number) => {
+  try {
+    const modeRef = ref(database, `standalones/${standaloneId}/mode`);
+    await update(modeRef, {
+      type: "instant",
+      duration_sec: durationSec,
+      updated_at: new Date().toISOString()
+    });
+    console.log('Standalone instant command sent');
+  } catch (error) {
+    console.error('Failed to send standalone instant command:', error);
+    throw error;
+  }
+};
+
+/**
+ * STANDALONE SCHEDULE BUTTON
+ */
+export const setStandaloneScheduleCommand = async (
+  standaloneId: string,
+  durationSec: number,
+  scheduleKey: string
+) => {
+  try {
+    const now = new Date().toISOString();
+    
+    const modeRef = ref(database, `standalones/${standaloneId}/mode`);
+    await update(modeRef, {
+      type: "schedule",
+      duration_sec: durationSec,
+      schedule_key: scheduleKey,
+      updated_at: now
+    });
+    
+    // Create scheduled_records entry
+    const scheduleRecordRef = ref(database, `standalones/${standaloneId}/scheduled_records/${scheduleKey}`);
+    await update(scheduleRecordRef, {
+      duration_sec: durationSec,
+      status: "pending",
+      created_at: now
+    });
+    
+    console.log('Standalone schedule command sent and record created');
+  } catch (error) {
+    console.error('Failed to send standalone schedule command:', error);
+    throw error;
+  }
+};
+
+/**
+ * STANDALONE UPLOAD BUTTON
+ */
+export const setStandaloneUploadCommand = async (
+  standaloneId: string,
+  scheduleKey: string
+) => {
+  try {
+    const now = new Date().toISOString();
+    
+    const modeRef = ref(database, `standalones/${standaloneId}/mode`);
+    await update(modeRef, {
+      type: "upload_scheduled",
+      schedule_key: scheduleKey,
+      updated_at: now
+    });
+    
+    console.log('Standalone upload command sent');
+  } catch (error) {
+    console.error('Failed to send standalone upload command:', error);
+    throw error;
+  }
+};
+
+// ==================== STANDALONE READ SUBSCRIPTIONS ====================
+
+/**
+ * Subscribe to standalone info
+ */
+export const subscribeToStandaloneInfo = (standaloneId: string, callback: (info: any) => void) => {
+  const infoRef = ref(database, `standalones/${standaloneId}/standaloneinfo`);
+  onValue(infoRef, (snapshot) => {
+    callback(snapshot.val() || {});
+  });
+  return () => off(infoRef);
+};
+
+/**
+ * Subscribe to standalone mode
+ */
+export const subscribeToStandaloneMode = (standaloneId: string, callback: (mode: any) => void) => {
+  const modeRef = ref(database, `standalones/${standaloneId}/mode`);
+  onValue(modeRef, (snapshot) => {
+    callback(snapshot.val() || {});
+  });
+  return () => off(modeRef);
+};
+
+/**
+ * Subscribe to standalone active status
+ */
+export const subscribeToStandaloneActiveStatus = (standaloneId: string, callback: (status: any) => void) => {
+  const statusRef = ref(database, `standalones/${standaloneId}/active_status`);
+  onValue(statusRef, (snapshot) => {
+    callback(snapshot.val() || {});
+  });
+  return () => off(statusRef);
+};
+
+/**
+ * Subscribe to standalone connection status
+ */
+export const subscribeToStandaloneConnectionStatus = (standaloneId: string, callback: (status: boolean) => void) => {
+  const statusRef = ref(database, `standalones/${standaloneId}/connection_status`);
+  onValue(statusRef, (snapshot) => {
+    callback(!!snapshot.val());
+  });
+  return () => off(statusRef);
+};
+
+/**
+ * Subscribe to standalone scheduled records
+ */
+export const subscribeToStandaloneScheduledRecords = (standaloneId: string, callback: (records: any) => void) => {
+  const recordsRef = ref(database, `standalones/${standaloneId}/scheduled_records`);
+  onValue(recordsRef, (snapshot) => {
+    callback(snapshot.val() || {});
+  });
+  return () => off(recordsRef);
+};
+
+/**
+ * Subscribe to standalone predictions
+ */
+export const subscribeToStandalonePredictions = (standaloneId: string, callback: (predictions: any) => void) => {
+  const predictionsRef = ref(database, `standalones/${standaloneId}/predictions`);
+  const unsubscribe = onValue(predictionsRef, (snapshot) => {
+    const predictions: any = {};
+    if (snapshot.exists()) {
+      const data = snapshot.val();
+      
+      Object.entries(data).forEach(([folderOrBatId, folderData]: [string, any]) => {
+        if (typeof folderData === 'object' && folderData !== null) {
+          const firstKey = Object.keys(folderData)[0];
+          const firstValue = folderData[firstKey];
+          
+          if (firstValue && typeof firstValue === 'object' && 's' in firstValue && 'c' in firstValue) {
+            const allSpecies = Object.keys(folderData)
+              .filter(key => !isNaN(parseInt(key)))
+              .sort((a, b) => parseInt(a) - parseInt(b))
+              .map(key => ({
+                species: folderData[key].s,
+                confidence: folderData[key].c
+              }));
+            
+            const fileName = `${folderOrBatId}.wav`;
+            predictions[fileName] = {
+              species: allSpecies[0]?.species || 'Unknown',
+              confidence: allSpecies[0]?.confidence || 0,
+              allSpecies: allSpecies
+            };
+            predictions[folderOrBatId] = predictions[fileName];
+          } else {
+            Object.entries(folderData).forEach(([batNumber, batData]: [string, any]) => {
+              if (typeof batData === 'object' && batData !== null) {
+                const allSpecies = Object.keys(batData)
+                  .filter(key => !isNaN(parseInt(key)))
+                  .sort((a, b) => parseInt(a) - parseInt(b))
+                  .map(key => ({
+                    species: batData[key]?.s,
+                    confidence: batData[key]?.c
+                  }))
+                  .filter(sp => sp.species && typeof sp.confidence === 'number');
+                
+                if (allSpecies.length > 0) {
+                  const fileName = `bat_${batNumber}.wav`;
+                  predictions[fileName] = {
+                    species: allSpecies[0]?.species || 'Unknown',
+                    confidence: allSpecies[0]?.confidence || 0,
+                    allSpecies: allSpecies
+                  };
+                  predictions[`bat_${batNumber}`] = predictions[fileName];
+                  predictions[batNumber] = predictions[fileName];
+                }
+              }
+            });
+          }
+        }
+      });
+    }
+    console.log('🔔 Firebase standalone predictions update:', Object.keys(predictions).length, 'predictions');
+    callback(predictions);
+  });
+  
+  return () => off(predictionsRef);
+};
+
+/**
+ * Save prediction for standalone
+ */
+export const saveStandalonePrediction = async (
+  standaloneId: string,
+  batId: string,
+  species: string,
+  confidence: number,
+  date?: string,
+  frequency?: string,
+  allSpecies?: any[],
+  folderTimestamp?: string
+) => {
+  if (!standaloneId || !batId) {
+    console.error('❌ [saveStandalonePrediction] Missing required parameters:', { standaloneId, batId });
+    return;
+  }
+
+  if (folderTimestamp && allSpecies && allSpecies.length > 0) {
+    let batNumber = batId.replace('.wav', '').replace('bat_', '');
+    
+    if (!batNumber) {
+      console.error('❌ [saveStandalonePrediction] Could not extract bat number from:', batId);
+      return;
+    }
+    
+    const path = `standalones/${standaloneId}/predictions/${folderTimestamp}/${batNumber}`;
+    console.log(`💾 [saveStandalonePrediction] Saving to: ${path}`);
+    console.log(`   Species count: ${allSpecies.length}`);
+    
+    const predRef = ref(database, path);
+
+    const cleanData: any = {};
+    allSpecies.forEach((sp, index) => {
+      if (sp && sp.species && typeof sp.confidence === 'number') {
+        cleanData[index] = {
+          s: sp.species,
+          c: sp.confidence
+        };
+      }
+    });
+    
+    if (Object.keys(cleanData).length > 0) {
+      await set(predRef, cleanData);
+      console.log(`✅ [saveStandalonePrediction] Saved ${Object.keys(cleanData).length} species for bat ${batNumber}`);
+    } else {
+      console.warn('⚠️ [saveStandalonePrediction] No valid species data to save');
+    }
+  } else if (species && typeof confidence === 'number') {
+    console.log(`💾 [saveStandalonePrediction] Fallback save for ${batId}`);
+    const predictionRef = ref(database, `standalones/${standaloneId}/predictions/${batId}`);
+    const data: any = { s: species, c: confidence };
+    if (date) data.d = date;
+    if (frequency) data.f = frequency;
+    await set(predictionRef, data);
+  } else {
+    console.warn('⚠️ [saveStandalonePrediction] No data to save - missing folderTimestamp or allSpecies');
+  }
+};
+
+/**
+ * Get folder predictions for standalone
+ */
+export const getStandaloneFolderPredictions = async (standaloneId: string, folderTimestamp: string) => {
+  const path = `standalones/${standaloneId}/predictions/${folderTimestamp}`;
+  console.log(`🔍 [getStandaloneFolderPredictions] Reading from: ${path}`);
+  
+  let folderRef = ref(database, path);
+  let snapshot = await get(folderRef);
+  
+  console.log(`🔍 [getStandaloneFolderPredictions] Snapshot exists: ${snapshot.exists()}`);
+  
+  if (snapshot.exists()) {
+    const data = snapshot.val();
+    console.log(`🔍 [getStandaloneFolderPredictions] Raw data keys:`, Object.keys(data));
+    const predictions: any = {};
+    
+    Object.keys(data).forEach(batNumber => {
+      const batData = data[batNumber];
+      if (typeof batData !== 'object' || batData === null) return;
+      
+      const allSpecies = Object.keys(batData)
+        .filter(key => !isNaN(parseInt(key)))
+        .sort((a, b) => parseInt(a) - parseInt(b))
+        .map(key => ({
+          species: batData[key]?.s,
+          confidence: batData[key]?.c
+        }))
+        .filter(sp => sp.species && typeof sp.confidence === 'number');
+      
+      if (allSpecies.length > 0) {
+        const fileName = `bat_${batNumber}.wav`;
+        predictions[fileName] = {
+          species: allSpecies[0]?.species || 'Unknown',
+          confidence: allSpecies[0]?.confidence || 0,
+          allSpecies: allSpecies
+        };
+      }
+    });
+    
+    console.log(`📦 Loaded ${Object.keys(predictions).length} predictions for ${folderTimestamp}`);
+    return predictions;
+  }
+  
+  console.log(`📭 No predictions found for ${folderTimestamp}`);
+  return {};
+};
+
 // ==================== CLIENT FUNCTIONS ====================
 
 /**

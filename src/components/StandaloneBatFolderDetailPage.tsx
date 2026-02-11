@@ -3,20 +3,19 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, MapPin, FileAudio, RefreshCw, ChevronDown, GripVertical, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { NavigationMenu } from './NavigationMenu';
 import { useMenu } from '../context/MenuContext';
-import { subscribeToPredictions, savePrediction } from '../firebase';
-import { loadFolderAudioWithPredictions, FolderAudioEntry } from '../services/folderPredictions';
+import { subscribeToStandalonePredictions, saveStandalonePrediction } from '../firebase';
+import { loadStandaloneFolderAudioWithPredictions, predictStandaloneSingleAudio, StandaloneFolderAudioEntry, normalizeStandaloneId, extractStandaloneNum, extractStandaloneTimestamp } from '../services/standalonePredictions';
 
-const BatFolderDetailPage: React.FC = () => {
-  const { folderTimestamp, serverNum, clientNum } = useParams<{
-    folderTimestamp: string;
-    serverNum: string;
-    clientNum: string;
+const StandaloneBatFolderDetailPage: React.FC = () => {
+  const { standaloneId, folderId } = useParams<{
+    standaloneId: string;
+    folderId: string;
   }>();
   const navigate = useNavigate();
   const { isExpanded } = useMenu();
 
   const [loading, setLoading] = useState(true);
-  const [audioResults, setAudioResults] = useState<FolderAudioEntry[]>([]);
+  const [audioResults, setAudioResults] = useState<StandaloneFolderAudioEntry[]>([]);
   const [selectedAudio, setSelectedAudio] = useState<any | null>(null);
   const [selectedDetails, setSelectedDetails] = useState<any | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -121,7 +120,7 @@ const BatFolderDetailPage: React.FC = () => {
 
   useEffect(() => {
     const loadFolderData = async () => {
-      if (!folderTimestamp || !serverNum || !clientNum) {
+      if (!standaloneId || !folderId) {
         setError('Missing required parameters');
         setLoading(false);
         return;
@@ -131,23 +130,25 @@ const BatFolderDetailPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const folderName = `server${serverNum}_client${clientNum}_${folderTimestamp}`;
-        setFolderName(folderName);
+        // folderId is the full folder name like "standalone1_15082026_1430"
+        setFolderName(folderId);
+        const timestamp = extractStandaloneTimestamp(folderId);
+        const standaloneNum = extractStandaloneNum(standaloneId);
+        const normalizedStandaloneId = normalizeStandaloneId(standaloneId);
         
-        console.log('🚀 Loading folder data:', { serverNum, clientNum, folderTimestamp });
+        console.log('🚀 Loading standalone folder data:', { standaloneId, folderId, timestamp });
         setProcessingStatus('Loading predictions and files...');
 
-        const { entries, timestamp, serverNum: sNum, clientNum: cNum } = await loadFolderAudioWithPredictions({
-          serverId: serverNum,  // Will be normalized to "server1" inside the service
-          clientId: clientNum,  // Will be normalized to "client1" inside the service
-          folderName
+        const { entries, timestamp: ts, standaloneNum: sNum } = await loadStandaloneFolderAudioWithPredictions({
+          standaloneId: normalizedStandaloneId,
+          folderName: folderId
         });
 
         setAudioResults(entries);
         
         const cachedCount = entries.filter(e => e.from_cache).length;
         const waitingCount = entries.filter(e => e.needs_prediction).length;
-        console.log(`✅ [BatFolderDetailPage] Loaded ${entries.length} files: ${cachedCount} cached, ${waitingCount} need prediction`);
+        console.log(`✅ [StandaloneBatFolderDetailPage] Loaded ${entries.length} files: ${cachedCount} cached, ${waitingCount} need prediction`);
         
         // Auto-select first file and fetch its details
         if (entries.length > 0) {
@@ -164,7 +165,7 @@ const BatFolderDetailPage: React.FC = () => {
           .filter(({ entry }) => entry.needs_prediction);
 
         if (filesToPredict.length > 0) {
-          console.log(`🔬 [BatFolderDetailPage] Starting SEQUENTIAL predictions for ${filesToPredict.length} files`);
+          console.log(`🔬 [StandaloneBatFolderDetailPage] Starting SEQUENTIAL predictions for ${filesToPredict.length} files`);
 
           // Create new AbortController for this prediction batch
           abortControllerRef.current = new AbortController();
@@ -175,12 +176,12 @@ const BatFolderDetailPage: React.FC = () => {
             for (const { entry, index } of filesToPredict) {
               // Check if cancelled
               if (signal.aborted) {
-                console.log(`🚫 [BatFolderDetailPage] Predictions cancelled`);
+                console.log(`🚫 [StandaloneBatFolderDetailPage] Predictions cancelled`);
                 break;
               }
               
               try {
-                console.log(`🔬 [BatFolderDetailPage] Predicting ${index + 1}/${filesToPredict.length}: ${entry.file_name}`);
+                console.log(`🔬 [StandaloneBatFolderDetailPage] Predicting ${index + 1}/${filesToPredict.length}: ${entry.file_name}`);
                 
                 // Mark as processing
                 setAudioResults(prev => {
@@ -196,21 +197,11 @@ const BatFolderDetailPage: React.FC = () => {
                   return updated;
                 });
 
-                // Predict using the shared service
-                const { predictSingleAudio } = await import('../services/folderPredictions');
-                const normalizedServerId = serverNum?.toLowerCase().startsWith('server') 
-                  ? serverNum.toLowerCase() 
-                  : `server${serverNum}`;
-                const normalizedClientId = clientNum?.toLowerCase().startsWith('client') 
-                  ? clientNum.toLowerCase() 
-                  : `client${clientNum}`;
-                
-                const updatedEntry = await predictSingleAudio({
-                  serverId: normalizedServerId,
-                  clientId: normalizedClientId,
-                  serverNum: sNum,
-                  clientNum: cNum,
-                  timestamp,
+                // Predict using the standalone service
+                const updatedEntry = await predictStandaloneSingleAudio({
+                  standaloneId: normalizedStandaloneId,
+                  standaloneNum: sNum,
+                  timestamp: ts,
                   audio: entry,
                   signal
                 });
@@ -225,15 +216,15 @@ const BatFolderDetailPage: React.FC = () => {
                   return updated;
                 });
                 
-                console.log(`✅ [BatFolderDetailPage] Completed ${index + 1}/${filesToPredict.length}: ${entry.file_name}`);
+                console.log(`✅ [StandaloneBatFolderDetailPage] Completed ${index + 1}/${filesToPredict.length}: ${entry.file_name}`);
               } catch (err) {
                 // Skip abort errors (expected when cancelling)
                 if (err instanceof Error && err.name === 'AbortError') {
-                  console.log(`🚫 [BatFolderDetailPage] Prediction cancelled for ${entry.file_name}`);
+                  console.log(`🚫 [StandaloneBatFolderDetailPage] Prediction cancelled for ${entry.file_name}`);
                   break;
                 }
                 
-                console.error(`❌ [BatFolderDetailPage] Prediction error for ${entry.file_name}:`, err);
+                console.error(`❌ [StandaloneBatFolderDetailPage] Prediction error for ${entry.file_name}:`, err);
                 
                 // Mark as error in UI
                 setAudioResults(prev => {
@@ -251,18 +242,14 @@ const BatFolderDetailPage: React.FC = () => {
                 });
               }
             }
-            console.log(`🎉 [BatFolderDetailPage] All predictions completed`);
+            console.log(`🎉 [StandaloneBatFolderDetailPage] All predictions completed`);
           })();
         }
         
         // Set up Firebase real-time listener for prediction updates
-        // Use serverNum/clientNum directly - subscribeToPredictions should handle normalization
         console.log('🔔 Setting up Firebase prediction listener...');
-        const normalizedServer = serverNum.toLowerCase().startsWith('server') ? serverNum.toLowerCase() : `server${serverNum}`;
-        const normalizedClient = clientNum.toLowerCase().startsWith('client') ? clientNum.toLowerCase() : `client${clientNum}`;
-        const unsubscribe = subscribeToPredictions(
-          normalizedServer,
-          normalizedClient,
+        const unsubscribe = subscribeToStandalonePredictions(
+          normalizedStandaloneId,
           (predictions) => {
             console.log('🔔 Received Firebase prediction update');
 
@@ -285,7 +272,7 @@ const BatFolderDetailPage: React.FC = () => {
             if (selectedAudio) {
               const pred = predictions[selectedAudio.file_name];
               if (pred && pred.allSpecies && pred.allSpecies.length > 0) {
-                setSelectedDetails(prev => prev ? {
+                setSelectedDetails((prev: any) => prev ? {
                   ...prev,
                   species: pred.allSpecies,
                   species_count: pred.allSpecies.length
@@ -311,7 +298,7 @@ const BatFolderDetailPage: React.FC = () => {
     return () => {
       // Cancel any ongoing predictions when navigating away
       if (abortControllerRef.current) {
-        console.log('🚫 [BatFolderDetailPage] Component unmounting - cancelling predictions');
+        console.log('🚫 [StandaloneBatFolderDetailPage] Component unmounting - cancelling predictions');
         abortControllerRef.current.abort();
       }
       
@@ -319,11 +306,11 @@ const BatFolderDetailPage: React.FC = () => {
         cleanup.then(fn => fn && fn());
       }
     };
-  }, [folderTimestamp, serverNum, clientNum]);
+  }, [standaloneId, folderId]);
 
   // Fetch detailed prediction data for selected audio
   // If from_cache is true, we just fetch media URLs without re-predicting
-  const fetchAudioDetails = async (audio: FolderAudioEntry, forcePredict: boolean = false) => {
+  const fetchAudioDetails = async (audio: StandaloneFolderAudioEntry, forcePredict: boolean = false) => {
     if (!audio) return;
     
     setLoadingDetails(true);
@@ -340,15 +327,19 @@ const BatFolderDetailPage: React.FC = () => {
       // If cached and not forcing prediction, use media-only endpoint
       const skipPrediction = audio.from_cache && !forcePredict;
       
-      const predictApiUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/audio/predict`;
+      // Extract values for API
+      const standaloneNum = extractStandaloneNum(standaloneId || '');
+      const folderTimestamp = extractStandaloneTimestamp(folderId || '');
+      const normalizedId = normalizeStandaloneId(standaloneId || '');
+      
+      const predictApiUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/standalone/audio/predict`;
       const response = await fetch(predictApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           file_id: audio.file_id,
           file_name: audio.file_name,
-          server_num: serverNum,
-          client_num: clientNum,
+          standalone_num: standaloneNum,
           folder_timestamp: folderTimestamp,
           skip_prediction: skipPrediction // Tell backend to skip ML prediction if cached
         }),
@@ -373,26 +364,17 @@ const BatFolderDetailPage: React.FC = () => {
 
         setSelectedDetails(result);
 
-        // Save to Firebase if we got a new prediction (NOT using predictSingleAudio which calls API again)
+        // Save to Firebase if we got a new prediction
         if (!skipPrediction && result.success && result.species && result.species.length > 0) {
           // Extract bat number from filename: "bat_1014.wav" -> "1014"
           const batIdMatch = audio.file_name.match(/bat_(\d+)/i);
           const batNumber = batIdMatch ? batIdMatch[1] : audio.file_name.replace('.wav', '');
           
-          // Normalize IDs
-          const normalizedServerId = serverNum?.toLowerCase().startsWith('server') 
-            ? serverNum.toLowerCase() 
-            : `server${serverNum}`;
-          const normalizedClientId = clientNum?.toLowerCase().startsWith('client') 
-            ? clientNum.toLowerCase() 
-            : `client${clientNum}`;
-          
-          console.log(`💾 [BatFolderDetailPage] Saving prediction to Firebase: ${normalizedServerId}/${normalizedClientId}/${folderTimestamp}/${batNumber}`);
+          console.log(`💾 [StandaloneBatFolderDetailPage] Saving prediction to Firebase: ${normalizedId}/${folderTimestamp}/${batNumber}`);
           
           try {
-            await savePrediction(
-              normalizedServerId,
-              normalizedClientId,
+            await saveStandalonePrediction(
+              normalizedId,
               batNumber,
               result.species[0].species,
               result.species[0].confidence,
@@ -401,13 +383,13 @@ const BatFolderDetailPage: React.FC = () => {
               result.species,
               folderTimestamp
             );
-            console.log(`✅ [BatFolderDetailPage] Saved prediction for ${audio.file_name}`);
+            console.log(`✅ [StandaloneBatFolderDetailPage] Saved prediction for ${audio.file_name}`);
           } catch (err) {
-            console.error('[BatFolderDetailPage] Firebase save error:', err);
+            console.error('[StandaloneBatFolderDetailPage] Firebase save error:', err);
           }
           
           // Update local state with prediction
-          const updatedEntry: FolderAudioEntry = {
+          const updatedEntry: StandaloneFolderAudioEntry = {
             ...audio,
             species: result.species,
             predicted_species: result.species[0].species,
@@ -430,7 +412,7 @@ const BatFolderDetailPage: React.FC = () => {
     } catch (err) {
       // Don't log errors if request was aborted (expected when navigating away)
       if (err instanceof Error && err.name === 'AbortError') {
-        console.log('🚫 [BatFolderDetailPage] Fetch cancelled');
+        console.log('🚫 [StandaloneBatFolderDetailPage] Fetch cancelled');
         return;
       }
       console.error('Error fetching details:', err);
@@ -956,4 +938,4 @@ const BatFolderDetailPage: React.FC = () => {
   );
 };
 
-export default BatFolderDetailPage;
+export default StandaloneBatFolderDetailPage;

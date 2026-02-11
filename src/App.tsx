@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react';
 import { Plus, Activity, Server, Users, TreePine } from 'lucide-react';
 import { ServerSection } from './components/ServerSection';
+import { StandaloneCard } from './components/StandaloneCard';
 import { AddServerModal } from './components/AddServerModal';
+import { AddStandaloneModal } from './components/AddStandaloneModal';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { useMenu } from './context/MenuContext';
-import { createServer, deleteServer, loadAllServers } from './firebase';
+import { createServer, deleteServer, loadAllServers, createStandalone, deleteStandalone, loadAllStandalones } from './firebase';
 
 interface ServerData {
+  id: string;
+  name: string;
+}
+
+interface StandaloneData {
   id: string;
   name: string;
 }
@@ -14,7 +21,9 @@ interface ServerData {
 function App() {
   const { isExpanded } = useMenu();
   const [servers, setServers] = useState<ServerData[]>([]);
+  const [standalones, setStandalones] = useState<StandaloneData[]>([]);
   const [isAddServerModalOpen, setIsAddServerModalOpen] = useState(false);
+  const [isAddStandaloneModalOpen, setIsAddStandaloneModalOpen] = useState(false);
   const [confirmationModal, setConfirmationModal] = useState<{
     isOpen: boolean;
     itemName: string;
@@ -40,6 +49,25 @@ function App() {
 
     return () => {
       console.log('🔴 Cleaning up Firebase listener for servers');
+      unsubscribe();
+    };
+  }, []);
+
+  // Load standalones from Firebase
+  useEffect(() => {
+    console.log('🔄 Setting up Firebase listener for standalones...');
+    const unsubscribe = loadAllStandalones((firebaseStandalones) => {
+      console.log('📡 Firebase standalones update received:', firebaseStandalones);
+      const standaloneArray: StandaloneData[] = Object.keys(firebaseStandalones).map((standaloneKey) => ({
+        id: standaloneKey,
+        name: standaloneKey.replace(/^\w/, c => c.toUpperCase()).replace(/(\d+)/, ' $1')
+      }));
+      console.log('Setting standalones from Firebase:', standaloneArray);
+      setStandalones(standaloneArray);
+    });
+
+    return () => {
+      console.log('🔴 Cleaning up Firebase listener for standalones');
       unsubscribe();
     };
   }, []);
@@ -87,7 +115,37 @@ function App() {
     });
   };
 
+  const addStandalone = async (standaloneNumber: number, location?: { lat: number; long: number; name: string }) => {
+    const standaloneId = `standalone${standaloneNumber}`;
+    
+    try {
+      await createStandalone(standaloneId, location);
+      console.log('Standalone created successfully in Firebase:', standaloneId);
+    } catch (error) {
+      console.error('Error creating standalone in Firebase:', error);
+    }
+  };
+
+  const removeStandalone = (standaloneId: string) => {
+    const standaloneToRemove = standalones.find(standalone => standalone.id === standaloneId);
+    if (!standaloneToRemove) return;
+    
+    setConfirmationModal({
+      isOpen: true,
+      itemName: standaloneToRemove.name,
+      onConfirm: () => {
+        deleteStandalone(standaloneId)
+          .then(() => {
+            console.log('Standalone deleted successfully');
+          })
+          .catch(error => console.error('Error deleting standalone:', error));
+      }
+    });
+  };
+
   const totalServers = servers.length;
+  const totalStandalones = standalones.length;
+  const totalItems = totalServers + totalStandalones;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50/80 to-blue-50/30 relative">
@@ -129,8 +187,8 @@ function App() {
                   <Server className="w-6 h-6 text-purple-200" />
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-white">{totalServers}</div>
-                  <div className="text-emerald-100 text-sm">Total Servers</div>
+                  <div className="text-2xl font-bold text-white">{totalItems}</div>
+                  <div className="text-emerald-100 text-sm">Servers & Standalones</div>
                 </div>
               </div>
             </div>
@@ -166,49 +224,79 @@ function App() {
       <div className={`max-w-7xl mx-auto px-4 py-6 transition-all duration-300 ${isExpanded ? 'ml-64' : 'ml-16'}`}>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Client - Server Network</h2>
-            <p className="text-gray-600 text-sm">Manage your bat detection Recording Stations</p>
+            <h2 className="text-xl font-bold text-gray-900">Recording Stations Network</h2>
+            <p className="text-gray-600 text-sm">Manage Servers, Standalones & Clients</p>
           </div>
           
-          <button
-            onClick={() => setIsAddServerModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all shadow-lg hover:shadow-xl text-sm"
-          >
-            <Plus className="w-5 h-5" />
-            Add Server
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsAddServerModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all shadow-lg hover:shadow-xl text-sm"
+            >
+              <Plus className="w-5 h-5" />
+              Add Server
+            </button>
+            <button
+              onClick={() => setIsAddStandaloneModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-[#0D6979] text-white rounded-lg hover:bg-[#0a5460] transition-all shadow-lg hover:shadow-xl text-sm"
+            >
+              <Plus className="w-5 h-5" />
+              Add Standalone
+            </button>
+          </div>
         </div>
 
         <div className="space-y-6">
-          {servers
+          {/* Combine servers and standalones, then sort by number */}
+          {[
+            ...servers.map(s => ({ ...s, type: 'server' as const })),
+            ...standalones.map(s => ({ ...s, type: 'standalone' as const }))
+          ]
             .sort((a, b) => {
-              const aNum = parseInt(a.name.replace('Server ', ''));
-              const bNum = parseInt(b.name.replace('Server ', ''));
+              const aNum = parseInt(a.name.match(/\d+/)?.[0] || '0');
+              const bNum = parseInt(b.name.match(/\d+/)?.[0] || '0');
               return aNum - bNum;
             })
-            .map((server) => (
-              <ServerSection
-                key={server.id}
-                serverId={server.id}
-                serverName={server.name}
-                onRemove={() => removeServer(server.id)}
-              />
+            .map((item) => (
+              item.type === 'server' ? (
+                <ServerSection
+                  key={item.id}
+                  serverId={item.id}
+                  serverName={item.name}
+                  onRemove={() => removeServer(item.id)}
+                />
+              ) : (
+                <StandaloneCard
+                  key={item.id}
+                  standaloneId={item.id}
+                  standaloneName={item.name}
+                  onRemove={() => removeStandalone(item.id)}
+                />
+              )
             ))}
         </div>
 
-        {servers.length === 0 && (
+        {servers.length === 0 && standalones.length === 0 && (
           <div className="text-center py-16">
             <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
               <Server className="w-10 h-10 text-gray-400" />
             </div>
-            <h3 className="text-base font-medium text-gray-900 mb-2">No Servers Available</h3>
-            <p className="text-gray-500 mb-6 text-sm">Add your first monitoring server to get started</p>
-            <button
-              onClick={() => setIsAddServerModalOpen(true)}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm"
-            >
-              Add Server
-            </button>
+            <h3 className="text-base font-medium text-gray-900 mb-2">No Recording Stations Available</h3>
+            <p className="text-gray-500 mb-6 text-sm">Add your first server or standalone to get started</p>
+            <div className="flex items-center gap-3 justify-center">
+              <button
+                onClick={() => setIsAddServerModalOpen(true)}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm"
+              >
+                Add Server
+              </button>
+              <button
+                onClick={() => setIsAddStandaloneModalOpen(true)}
+                className="px-4 py-2 bg-[#0D6979] text-white rounded-lg hover:bg-[#0a5460] transition-colors text-sm"
+              >
+                Add Standalone
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -220,12 +308,19 @@ function App() {
         existingServers={servers.map(s => s.name)}
       />
 
+      <AddStandaloneModal
+        isOpen={isAddStandaloneModalOpen}
+        onClose={() => setIsAddStandaloneModalOpen(false)}
+        onAdd={addStandalone}
+        existingStandalones={standalones.map(s => s.name)}
+      />
+
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
         onClose={() => setConfirmationModal(prev => ({ ...prev, isOpen: false }))}
         onConfirm={confirmationModal.onConfirm}
-        title="Delete Server?"
-        message="Are you sure you want to delete this server?"
+        title="Delete Item?"
+        message="Are you sure you want to delete this item?"
         itemName={confirmationModal.itemName}
         type="server"
       />

@@ -14,7 +14,7 @@
 
 import { getFolderPredictions, savePrediction } from '../firebase';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://bcitbackend1-drcveyacfxadeffs.koreacentral-01.azurewebsites.net';
 
 // ============================================================================
 // TYPES
